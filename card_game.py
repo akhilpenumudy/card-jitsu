@@ -25,6 +25,8 @@ SMALL_CARD_HEIGHT = 32
 END_SCREEN_ANIMATION_DURATION = 1000  # 1 second for fade in
 VICTORY_CARD_SPIN_SPEED = 2  # degrees per frame
 CONFETTI_COUNT = 100
+COMPARISON_PAUSE = 1500  # 1.5 seconds to show the winner
+WINNER_COLOR = (50, 205, 50)  # Green color for winner highlight
 
 # Colors
 BLACK = (0, 0, 0)
@@ -165,23 +167,6 @@ def draw_game_board():
     dock_rect = pygame.Rect(0, WINDOW_HEIGHT - DOCK_HEIGHT, WINDOW_WIDTH, DOCK_HEIGHT)
     pygame.draw.rect(screen, BLACK, dock_rect, 2)
 
-    # Draw player's play area (bottom-left of middle screen)
-    player_area = pygame.Rect(
-        50, WINDOW_HEIGHT // 2 - CARD_HEIGHT // 2, CARD_WIDTH + 20, CARD_HEIGHT + 20
-    )
-    pygame.draw.rect(screen, GRAY, player_area)
-    pygame.draw.rect(screen, BLACK, player_area, 2)
-
-    # Draw computer's play area (bottom-right of middle screen)
-    computer_area = pygame.Rect(
-        WINDOW_WIDTH - CARD_WIDTH - 70,
-        WINDOW_HEIGHT // 2 - CARD_HEIGHT // 2,
-        CARD_WIDTH + 20,
-        CARD_HEIGHT + 20,
-    )
-    pygame.draw.rect(screen, GRAY, computer_area)
-    pygame.draw.rect(screen, BLACK, computer_area, 2)
-
 
 def deal_cards(deck, num_cards):
     return random.sample(deck, num_cards)
@@ -207,6 +192,8 @@ class PlayArea:
     def __init__(self, x, y, width, height):
         self.rect = pygame.Rect(x, y, width, height)
         self.card = None
+        self.highlight = False
+        self.highlight_color = WINNER_COLOR
 
     def add_card(self, card):
         self.card = card
@@ -219,6 +206,17 @@ class PlayArea:
 
     def is_empty(self):
         return self.card is None
+
+    def draw(self, surface):
+        # Draw the play area
+        pygame.draw.rect(surface, GRAY, self.rect)
+        # Draw the border with appropriate color
+        border_color = self.highlight_color if self.highlight else BLACK
+        pygame.draw.rect(surface, border_color, self.rect, 2)
+
+        # Draw the card if there is one
+        if self.card:
+            self.card.draw(surface)
 
 
 class Timer:
@@ -389,6 +387,13 @@ class ScoreBoard:
                 self.small_card_images[f"{suit}_{value}"] = img
 
     def compare_cards(self, player_card, computer_card):
+        # Check for exact same card (draw)
+        if (
+            player_card.suit == computer_card.suit
+            and player_card.value == computer_card.value
+        ):
+            return None  # Return None to indicate a draw
+
         # Define the winning relationships
         beats = {"diamonds": "spades", "spades": "hearts", "hearts": "diamonds"}
 
@@ -653,22 +658,42 @@ def main():
 
         # Handle round resolution
         if resolving_round:
-            if pygame.time.get_ticks() - resolution_start_time >= RESOLUTION_DELAY:
-                # Compare cards and determine winner
+            current_time = pygame.time.get_ticks()
+
+            # First phase: Show winner highlight
+            if current_time - resolution_start_time < COMPARISON_PAUSE:
+                # Compare cards and highlight winner
                 player_card = player_play_area.card
                 computer_card = computer_play_area.card
 
                 player_wins = scoreboard.compare_cards(player_card, computer_card)
 
-                # Add winning card to score display
-                if player_wins:
-                    scoreboard.add_win(player_card, True)
-                else:
-                    scoreboard.add_win(computer_card, False)
+                # Highlight winner's play area (no highlight for draws)
+                if player_wins is not None:  # Only highlight if not a draw
+                    player_play_area.highlight = player_wins
+                    computer_play_area.highlight = not player_wins
+
+            # Second phase: Process round end and deal new cards
+            elif current_time - resolution_start_time >= COMPARISON_PAUSE:
+                player_card = player_play_area.card
+                computer_card = computer_play_area.card
+
+                player_wins = scoreboard.compare_cards(player_card, computer_card)
+
+                # Add winning card to score display (skip if draw)
+                if player_wins is not None:  # Only add win if not a draw
+                    if player_wins:
+                        scoreboard.add_win(player_card, True)
+                    else:
+                        scoreboard.add_win(computer_card, False)
 
                 # Remove the played card from player's hand
                 if player_card in player_hand:
                     player_hand.remove(player_card)
+
+                # Reset highlights
+                player_play_area.highlight = False
+                computer_play_area.highlight = False
 
                 # Clear play areas
                 player_play_area.remove_card()
@@ -736,18 +761,28 @@ def main():
         # Draw everything
         draw_game_board()
 
-        # Draw player cards
+        # Find the currently dragged card (if any)
+        dragged_card = None
         for card in player_hand:
-            card.draw(screen)
+            if card.dragging:
+                dragged_card = card
+                break
+
+        # Draw non-dragged player cards
+        for card in player_hand:
+            if not card.dragging:
+                card.draw(screen)
 
         # Draw computer's cards (backs)
         computer.draw(screen)
 
-        # Draw cards in play areas
-        if player_play_area.card:
-            player_play_area.card.draw(screen)
-        if computer_play_area.card:
-            computer_play_area.card.draw(screen)
+        # Draw play areas and their cards
+        player_play_area.draw(screen)
+        computer_play_area.draw(screen)
+
+        # Draw the dragged card last (on top)
+        if dragged_card:
+            dragged_card.draw(screen)
 
         # Draw the GO button
         go_button.draw(screen)
