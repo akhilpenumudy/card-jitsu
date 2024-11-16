@@ -146,14 +146,19 @@ def create_deck():
     suits = ["hearts", "diamonds", "spades"]
     values = range(2, 11)
 
-    for suit in suits:
-        for value in values:
-            image_path = os.path.join(
-                "Cards (large)", f"card_{suit}_{str(value).zfill(2)}.png"
-            )
-            cards.append(Card(suit, value, image_path))
+    # Create two identical decks
+    for _ in range(2):  # Make two copies of each card
+        for suit in suits:
+            for value in values:
+                image_path = os.path.join(
+                    "Cards (large)", f"card_{suit}_{str(value).zfill(2)}.png"
+                )
+                cards.append(Card(suit, value, image_path))
 
-    return cards
+    # Split the deck into player and computer portions
+    random.shuffle(cards)
+    mid = len(cards) // 2
+    return cards[:mid], cards[mid:]  # Return (player_deck, computer_deck)
 
 
 background = pygame.Surface(screen.get_size())
@@ -636,11 +641,15 @@ class ReplayButton:
 class TitleScreen:
     def __init__(self):
         self.font_title = pygame.font.Font(None, 100)
-        self.background_color = (135, 206, 235)  # Same as game background
-        self.title_color = (255, 215, 0)  # Gold color
+        self.font_info = pygame.font.Font(None, 36)
+        self.background_color = (135, 206, 235)
+        self.title_color = (255, 215, 0)
         self.start_button = StartButton(
             WINDOW_WIDTH // 2 - 100, WINDOW_HEIGHT // 2 + 50, 200, 60
         )
+        self.info_button = InfoButton(WINDOW_WIDTH - 50, 20, 30, 30)
+        self.show_info = False
+        self.info_popup = InfoPopup()
 
     def draw(self, surface):
         # Fill background
@@ -667,8 +676,24 @@ class TitleScreen:
         # Draw start button
         self.start_button.draw(surface)
 
+        # Draw info button
+        self.info_button.draw(surface)
+
+        # Draw info popup if active
+        if self.show_info:
+            self.info_popup.draw(surface)
+
     def handle_event(self, event):
-        return self.start_button.handle_event(event)
+        if self.show_info:
+            if self.info_popup.handle_event(event):
+                self.show_info = False
+                return False
+        else:
+            if self.info_button.handle_event(event):
+                self.show_info = True
+                return False
+            return self.start_button.handle_event(event)
+        return False
 
 
 class StartButton:
@@ -696,13 +721,125 @@ class StartButton:
         return False
 
 
-def start_game():
-    # Create and shuffle the deck
-    deck = create_deck()
+class InfoButton:
+    def __init__(self, x, y, width, height):
+        self.rect = pygame.Rect(x, y, width, height)
+        self.font = pygame.font.Font(None, 36)
+        self.color = (50, 205, 50)
+        self.hover = False
 
-    # Deal cards to both players
-    player_hand = deal_cards(deck, 5)
-    computer_hand = deal_cards(deck, 5)
+    def draw(self, surface):
+        # Draw circle background
+        color = (60, 235, 60) if self.hover else self.color
+        pygame.draw.circle(surface, color, self.rect.center, self.rect.width // 2)
+        pygame.draw.circle(surface, BLACK, self.rect.center, self.rect.width // 2, 2)
+
+        # Draw "i" text
+        text = self.font.render("i", True, BLACK)
+        text_rect = text.get_rect(center=self.rect.center)
+        surface.blit(text, text_rect)
+
+    def handle_event(self, event):
+        if event.type == pygame.MOUSEMOTION:
+            self.hover = self.rect.collidepoint(event.pos)
+        elif event.type == pygame.MOUSEBUTTONDOWN:
+            if self.rect.collidepoint(event.pos):
+                return True
+        return False
+
+
+class InfoPopup:
+    def __init__(self):
+        self.width = 600
+        self.height = 550
+        self.rect = pygame.Rect(
+            (WINDOW_WIDTH - self.width) // 2,
+            (WINDOW_HEIGHT - self.height) // 2,
+            self.width,
+            self.height,
+        )
+        self.font_title = pygame.font.Font(None, 36)
+        self.font_text = pygame.font.Font(None, 24)
+        self.close_button = pygame.Rect(
+            self.rect.right - 40, self.rect.top + 10, 30, 30
+        )
+
+        # Game instructions text
+        self.instructions = [
+            "Welcome to Poker-jitsu!",
+            "",
+            "Game Rules:",
+            "- Each player starts with 5 cards",
+            "- Players take turns playing one card at a time",
+            "- Cards follow a rock-paper-scissors style system:",
+            "  • Diamonds beat Spades",
+            "  • Spades beat Hearts",
+            "  • Hearts beat Diamonds",
+            "",
+            "- If both players play the same suit, the higher number wins",
+            "",
+            "- First player to win 4 rounds wins the game!",
+        ]
+
+    def draw(self, surface):
+        # Draw semi-transparent background
+        overlay = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT))
+        overlay.fill((0, 0, 0))
+        overlay.set_alpha(128)
+        surface.blit(overlay, (0, 0))
+
+        # Draw popup background
+        pygame.draw.rect(surface, WHITE, self.rect)
+        pygame.draw.rect(surface, BLACK, self.rect, 2)
+
+        # Draw close button
+        pygame.draw.rect(surface, (255, 100, 100), self.close_button)
+        pygame.draw.rect(surface, BLACK, self.close_button, 2)
+        close_text = self.font_text.render("X", True, BLACK)
+        close_rect = close_text.get_rect(center=self.close_button.center)
+        surface.blit(close_text, close_rect)
+
+        # Draw instructions text
+        y_offset = self.rect.top + 20
+        for line in self.instructions:
+            if line.startswith("Welcome"):
+                text = self.font_title.render(line, True, BLACK)
+                y_offset += 10
+            else:
+                text = self.font_text.render(line, True, BLACK)
+            text_rect = text.get_rect(x=self.rect.left + 20, y=y_offset)
+            surface.blit(text, text_rect)
+            y_offset += 30
+
+        # Draw instruction image
+        img_rect = instructions_img.get_rect()
+        img_rect.centerx = self.rect.centerx
+        img_rect.bottom = self.rect.bottom - 10
+        surface.blit(instructions_img, img_rect)
+
+    def handle_event(self, event):
+        if event.type == pygame.MOUSEBUTTONDOWN:
+            # Check if clicked outside popup or on close button
+            if not self.rect.collidepoint(event.pos) or self.close_button.collidepoint(
+                event.pos
+            ):
+                return True
+        return False
+
+
+def start_game():
+    # Create and shuffle the decks
+    player_deck, computer_deck = create_deck()
+
+    # Deal cards to both players from their respective decks
+    player_hand = deal_cards(player_deck, 5)
+    computer_hand = deal_cards(computer_deck, 5)
+
+    # Remove dealt cards from decks
+    for card in player_hand:
+        player_deck.remove(card)
+    for card in computer_hand:
+        computer_deck.remove(card)
 
     # Create the play areas
     player_play_area = PlayArea(
@@ -836,17 +973,23 @@ def start_game():
 
                 # Only continue with next round if game isn't over
                 if not header.game_over:
+                    # Calculate how many cards need to be dealt to player
+                    cards_needed = 5 - len(player_hand)
+
                     # Deal new cards if there are cards left in the deck
-                    if len(deck) > 0:
-                        # Deal to player
-                        new_player_card = deal_cards(deck, 1)[0]
-                        player_hand.append(new_player_card)
+                    if len(player_deck) > 0 and cards_needed > 0:
+                        # Deal to player from player deck
+                        new_player_cards = deal_cards(
+                            player_deck, min(cards_needed, len(player_deck))
+                        )
+                        player_hand.extend(new_player_cards)
 
-                        # Deal to computer
-                        new_computer_card = deal_cards(deck, 1)[0]
-                        computer.add_card(new_computer_card)
+                        # Deal to computer from computer deck
+                        if len(computer_deck) > 0:
+                            new_computer_card = deal_cards(computer_deck, 1)[0]
+                            computer.add_card(new_computer_card)
 
-                    # Reposition all player cards including the new one
+                    # Reposition all player cards including the new ones
                     dock_start_x = (
                         WINDOW_WIDTH
                         - (
@@ -861,7 +1004,7 @@ def start_game():
                             dock_start_x + i * (CARD_WIDTH + CARD_SPACING),
                             dock_y,
                         )
-                        if card == new_player_card:  # If it's the new card, animate it
+                        if card in new_player_cards:  # If it's a new card, animate it
                             card.start_deal_animation(target_pos)
                         else:  # Otherwise just reposition it
                             card.set_position(*target_pos)
