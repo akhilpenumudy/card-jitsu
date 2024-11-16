@@ -633,7 +633,70 @@ class ReplayButton:
         return False
 
 
-def main():
+class TitleScreen:
+    def __init__(self):
+        self.font_title = pygame.font.Font(None, 100)
+        self.background_color = (135, 206, 235)  # Same as game background
+        self.title_color = (255, 215, 0)  # Gold color
+        self.start_button = StartButton(
+            WINDOW_WIDTH // 2 - 100, WINDOW_HEIGHT // 2 + 50, 200, 60
+        )
+
+    def draw(self, surface):
+        # Fill background
+        surface.fill(self.background_color)
+
+        # Draw title
+        title_text = self.font_title.render("Poker-jitsu!", True, self.title_color)
+        title_shadow = self.font_title.render("Poker-jitsu!", True, BLACK)
+
+        # Position for title
+        title_pos = title_text.get_rect(
+            center=(WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2 - 50)
+        )
+
+        # Draw shadow slightly offset
+        shadow_pos = title_pos.copy()
+        shadow_pos.x += 3
+        shadow_pos.y += 3
+        surface.blit(title_shadow, shadow_pos)
+
+        # Draw main title
+        surface.blit(title_text, title_pos)
+
+        # Draw start button
+        self.start_button.draw(surface)
+
+    def handle_event(self, event):
+        return self.start_button.handle_event(event)
+
+
+class StartButton:
+    def __init__(self, x, y, width, height):
+        self.rect = pygame.Rect(x, y, width, height)
+        self.font = pygame.font.Font(None, 48)
+        self.color = (50, 205, 50)  # Green
+        self.hover = False
+
+    def draw(self, surface):
+        color = (60, 235, 60) if self.hover else self.color
+        pygame.draw.rect(surface, color, self.rect)
+        pygame.draw.rect(surface, BLACK, self.rect, 2)
+
+        text = self.font.render("START", True, BLACK)
+        text_rect = text.get_rect(center=self.rect.center)
+        surface.blit(text, text_rect)
+
+    def handle_event(self, event):
+        if event.type == pygame.MOUSEMOTION:
+            self.hover = self.rect.collidepoint(event.pos)
+        elif event.type == pygame.MOUSEBUTTONDOWN:
+            if self.rect.collidepoint(event.pos):
+                return True
+        return False
+
+
+def start_game():
     # Create and shuffle the deck
     deck = create_deck()
 
@@ -663,27 +726,28 @@ def main():
     # Create the header
     header = Header()
 
+    # Create scoreboard
+    scoreboard = ScoreBoard()
+
+    # Create end screen
+    end_screen = EndScreen()
+    end_screen_started = False
+
     # Position the player's cards in the dock
-    dock_start_x = (WINDOW_WIDTH - (CARD_WIDTH * 5 + CARD_SPACING * 4)) // 2
+    dock_start_x = (
+        WINDOW_WIDTH
+        - (CARD_WIDTH * len(player_hand) + CARD_SPACING * (len(player_hand) - 1))
+    ) // 2
     dock_y = WINDOW_HEIGHT - DOCK_HEIGHT + 25
 
     for i, card in enumerate(player_hand):
         card.set_position(dock_start_x + i * (CARD_WIDTH + CARD_SPACING), dock_y)
 
-    # Add scoreboard
-    scoreboard = ScoreBoard()
-
-    # Add game state flags
-    resolving_round = False
-    resolution_start_time = None
-
     running = True
     clock = pygame.time.Clock()
     computer_play_time = None
-
-    # Add end screen
-    end_screen = EndScreen()
-    end_screen_started = False
+    resolving_round = False
+    resolution_start_time = None
 
     while running:
         for event in pygame.event.get():
@@ -692,8 +756,7 @@ def main():
 
             if header.game_over:
                 if end_screen.handle_event(event):
-                    # Reset game
-                    return main()
+                    return main()  # Restart the game
             elif header.is_player_turn and not resolving_round:
                 # Handle card dragging during player's turn
                 for card in player_hand:
@@ -757,23 +820,19 @@ def main():
                     else:
                         scoreboard.add_win(computer_card, False)
 
-                # Remove the played card from player's hand
-                if player_card in player_hand:
-                    player_hand.remove(player_card)
-
-                # Reset highlights
-                player_play_area.highlight = False
-                computer_play_area.highlight = False
-
-                # Clear play areas
-                player_play_area.remove_card()
-                computer_play_area.remove_card()
-
                 # Check if game is over
                 if scoreboard.player_score >= 4:
                     header.set_game_over("PLAYER")
                 elif scoreboard.computer_score >= 4:
                     header.set_game_over("COMPUTER")
+
+                # Remove the played card from player's hand
+                if player_card in player_hand:
+                    player_hand.remove(player_card)
+
+                # Clear play areas
+                player_play_area.remove_card()
+                computer_play_area.remove_card()
 
                 # Only continue with next round if game isn't over
                 if not header.game_over:
@@ -810,9 +869,11 @@ def main():
 
                     header.round += 1
 
-                # Reset for next round or end game
+                # Reset for next round
                 resolving_round = False
                 computer_play_time = None
+                player_play_area.highlight = False
+                computer_play_area.highlight = False
                 if not header.game_over:
                     header.switch_turn()
 
@@ -881,6 +942,33 @@ def main():
 
     pygame.quit()
     sys.exit()
+
+
+def main():
+    # Create title screen
+    title_screen = TitleScreen()
+    game_started = False
+
+    running = True
+    clock = pygame.time.Clock()
+
+    while running and not game_started:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+            if title_screen.handle_event(event):
+                game_started = True
+
+        # Draw title screen
+        title_screen.draw(screen)
+        pygame.display.flip()
+        clock.tick(60)
+
+    if game_started:
+        start_game()  # This will contain all the existing game code
+    else:
+        pygame.quit()
+        sys.exit()
 
 
 if __name__ == "__main__":
