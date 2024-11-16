@@ -2,6 +2,7 @@ import pygame
 import sys
 import random
 import os
+import math
 
 # Initialize Pygame
 pygame.init()
@@ -285,6 +286,9 @@ class Header:
         self.is_player_turn = True
         self.game_over = False
         self.winner = None  # Will be either "PLAYER" or "COMPUTER"
+        self.reveal_message = None
+        self.reveal_message_start = None
+        self.reveal_message_duration = 2000  # 2 seconds
 
     def switch_turn(self):
         self.is_player_turn = not self.is_player_turn
@@ -318,16 +322,63 @@ class Header:
         )
         surface.blit(round_text, round_rect)
 
+        # Draw reveal message if active
+        if self.reveal_message and self.reveal_message_start:
+            current_time = pygame.time.get_ticks()
+            if current_time - self.reveal_message_start < self.reveal_message_duration:
+                alpha = 255
+                if (
+                    current_time - self.reveal_message_start
+                    > self.reveal_message_duration - 500
+                ):
+                    # Fade out in last 500ms
+                    alpha = int(
+                        255
+                        * (
+                            1
+                            - (
+                                current_time
+                                - (
+                                    self.reveal_message_start
+                                    + self.reveal_message_duration
+                                    - 500
+                                )
+                            )
+                            / 500
+                        )
+                    )
+
+                reveal_text = self.font.render(
+                    self.reveal_message, True, (255, 215, 0)
+                )  # Golden color
+                reveal_text.set_alpha(alpha)
+                reveal_rect = reveal_text.get_rect(
+                    center=(WINDOW_WIDTH // 2, HEADER_HEIGHT + 20)
+                )
+                surface.blit(reveal_text, reveal_rect)
+            else:
+                self.reveal_message = None
+                self.reveal_message_start = None
+
     def set_game_over(self, winner):
         self.game_over = True
         self.winner = winner
         self.current_turn = f"{winner} WINS!"
 
+    def show_reveal_message(self, is_player_revealed):
+        self.reveal_message = (
+            "Computer's Cards Revealed!"
+            if not is_player_revealed
+            else "Your Cards Revealed!"
+        )
+        self.reveal_message_start = pygame.time.get_ticks()
+
 
 class ComputerPlayer:
-    def __init__(self, hand, play_area):
+    def __init__(self, hand, play_area, scoreboard):
         self.hand = hand
         self.play_area = play_area
+        self.scoreboard = scoreboard
         self.card_backs = []
         self.animating_new_card = False
         self.animation_start = None
@@ -335,6 +386,8 @@ class ComputerPlayer:
         self.animation_start_pos = None
         self.animation_end_pos = None
         self.update_card_backs()
+        self.glow_effect = 0
+        self.glow_speed = 0.1
 
     def update_card_backs(self):
         # Clear existing card backs
@@ -433,14 +486,42 @@ class ComputerPlayer:
             last_card["rect"].topleft = (x, y)
 
     def draw(self, surface):
-        # Draw all card backs except the last one if animating
-        for i, card_back in enumerate(self.card_backs):
-            if not (self.animating_new_card and i == len(self.card_backs) - 1):
-                surface.blit(card_back["image"], card_back["rect"])
+        print(f"Reveal status: {self.scoreboard.reveal_computer_cards}")  # Debug print
+        if self.scoreboard.reveal_computer_cards:
+            print(f"Drawing revealed cards. Hand size: {len(self.hand)}")  # Debug print
+            # Draw actual cards with glow effect
+            self.glow_effect = (self.glow_effect + self.glow_speed) % (2 * math.pi)
+            glow_intensity = (math.sin(self.glow_effect) + 1) / 2  # 0 to 1
 
-        # Draw the animating card last if there is one
-        if self.animating_new_card and self.card_backs:
-            surface.blit(self.card_backs[-1]["image"], self.card_backs[-1]["rect"])
+            for i, card in enumerate(self.hand):
+                # Draw glow effect
+                glow_surf = pygame.Surface(
+                    (CARD_WIDTH + 20, CARD_HEIGHT + 20), pygame.SRCALPHA
+                )
+                pygame.draw.rect(
+                    glow_surf,
+                    (0, 255, 0, int(128 * glow_intensity)),
+                    glow_surf.get_rect(),
+                    border_radius=10,
+                )
+
+                if i < len(self.card_backs):
+                    card_rect = self.card_backs[i]["rect"]
+                    # Draw glow
+                    glow_rect = glow_surf.get_rect(center=card_rect.center)
+                    surface.blit(glow_surf, glow_rect)
+
+                    # Draw actual card
+                    surface.blit(card.image, card_rect)
+                    print(f"Drew card {i}: {card.suit}_{card.value}")  # Debug print
+        else:
+            # Original drawing code for card backs
+            for i, card_back in enumerate(self.card_backs):
+                if not (self.animating_new_card and i == len(self.card_backs) - 1):
+                    surface.blit(card_back["image"], card_back["rect"])
+
+            if self.animating_new_card and self.card_backs:
+                surface.blit(self.card_backs[-1]["image"], self.card_backs[-1]["rect"])
 
 
 class ScoreBoard:
@@ -449,18 +530,34 @@ class ScoreBoard:
         self.computer_score = 0
         self.player_wins = []  # List of winning cards (small versions)
         self.computer_wins = []
+        self.player_win_history = []  # List of (card, timestamp) tuples
+        self.computer_win_history = []
+        self.reveal_player_cards = False
+        self.reveal_computer_cards = False
+        self.reveal_effect_start = None
+        self.reveal_effect_duration = 2000  # 2 seconds for flash effect
         self.load_small_cards()
+        self.current_round = 1  # Add this to track rounds
+        self.reveal_started_round = None  # Add this to track when reveal started
 
-    def load_small_cards(self):
-        self.small_card_images = {}
-        small_cards_path = "Cards (small)"
-        for suit in ["hearts", "diamonds", "spades"]:
-            for value in range(2, 11):
-                filename = f"card_{suit}_{str(value).zfill(2)}.png"
-                path = os.path.join(small_cards_path, filename)
-                img = pygame.image.load(path)
-                img = pygame.transform.scale(img, (SMALL_CARD_WIDTH, SMALL_CARD_HEIGHT))
-                self.small_card_images[f"{suit}_{value}"] = img
+    def check_matching_wins(self, win_history):
+        if len(win_history) < 2:
+            return False
+
+        last_two_wins = win_history[-2:]
+        card1, _ = last_two_wins[-1]
+        card2, _ = last_two_wins[-2]
+
+        # Print debug info
+        print(
+            f"Checking cards: {card1.suit}_{card1.value} vs {card2.suit}_{card2.value}"
+        )
+
+        # Check for matching suit or value
+        matches = card1.suit == card2.suit or card1.value == card2.value
+        if matches:
+            print("Found a match!")
+        return matches
 
     def compare_cards(self, player_card, computer_card):
         # Check for exact same card (draw)
@@ -480,14 +577,81 @@ class ScoreBoard:
             # Different suits, check if player's card beats computer's card
             return beats[player_card.suit] == computer_card.suit
 
-    def add_win(self, winning_card, is_player_win):
+    def update_reveal_effect(self):
+        if self.reveal_effect_start is not None:
+            current_time = pygame.time.get_ticks()
+            # Only reset the reveal effect start time, but keep the reveal flags
+            if current_time - self.reveal_effect_start > self.reveal_effect_duration:
+                print("Resetting reveal effect start time")  # Debug print
+                self.reveal_effect_start = None
+
+    def new_round(self):
+        print(f"Starting new round {self.current_round + 1}")
+        print(
+            "Current reveal flags:",
+            self.reveal_player_cards,
+            self.reveal_computer_cards,
+        )
+
+        # Only reset reveal flags if they've been active for one full round
+        if (
+            self.reveal_player_cards or self.reveal_computer_cards
+        ) and self.reveal_started_round is not None:
+            if self.current_round > self.reveal_started_round:
+                print("Resetting reveal flags after one round")
+                self.reveal_player_cards = False
+                self.reveal_computer_cards = False
+                self.reveal_started_round = None
+
+        self.current_round += 1
+
+    def add_win(self, winning_card, is_player_win, header):
         card_key = f"{winning_card.suit}_{winning_card.value}"
+        timestamp = pygame.time.get_ticks()
+
         if is_player_win:
             self.player_score += 1
             self.player_wins.append(self.small_card_images[card_key])
+            self.player_win_history.append((winning_card, timestamp))
+            # Check if player's last two wins match
+            if self.check_matching_wins(self.player_win_history):
+                print("Player matched! Revealing computer cards")  # Debug print
+                self.reveal_computer_cards = True
+                self.reveal_effect_start = timestamp
+                self.reveal_started_round = (
+                    self.current_round
+                )  # Track when reveal started
+                header.show_reveal_message(False)
+                print(
+                    f"Set reveal_computer_cards to {self.reveal_computer_cards}"
+                )  # Debug print
         else:
             self.computer_score += 1
             self.computer_wins.append(self.small_card_images[card_key])
+            self.computer_win_history.append((winning_card, timestamp))
+            # Check if computer's last two wins match
+            if self.check_matching_wins(self.computer_win_history):
+                print("Computer matched! Revealing player cards")  # Debug print
+                self.reveal_player_cards = True
+                self.reveal_effect_start = timestamp
+                self.reveal_started_round = (
+                    self.current_round
+                )  # Track when reveal started
+                header.show_reveal_message(True)
+                print(
+                    f"Set reveal_player_cards to {self.reveal_player_cards}"
+                )  # Debug print
+
+    def load_small_cards(self):
+        self.small_card_images = {}
+        small_cards_path = "Cards (small)"
+        for suit in ["hearts", "diamonds", "spades"]:
+            for value in range(2, 11):
+                filename = f"card_{suit}_{str(value).zfill(2)}.png"
+                path = os.path.join(small_cards_path, filename)
+                img = pygame.image.load(path)
+                img = pygame.transform.scale(img, (SMALL_CARD_WIDTH, SMALL_CARD_HEIGHT))
+                self.small_card_images[f"{suit}_{value}"] = img
 
     def draw(self, surface):
         # Draw player's winning cards on the left
@@ -852,8 +1016,11 @@ def start_game():
         CARD_HEIGHT + 20,
     )
 
-    # Create the computer player
-    computer = ComputerPlayer(computer_hand, computer_play_area)
+    # Create the scoreboard first
+    scoreboard = ScoreBoard()
+
+    # Create the computer player with scoreboard
+    computer = ComputerPlayer(computer_hand, computer_play_area, scoreboard)
 
     # Create the GO button
     go_button = Button(
@@ -862,9 +1029,6 @@ def start_game():
 
     # Create the header
     header = Header()
-
-    # Create scoreboard
-    scoreboard = ScoreBoard()
 
     # Create end screen
     end_screen = EndScreen()
@@ -953,9 +1117,9 @@ def start_game():
                 # Add winning card to score display (skip if draw)
                 if player_wins is not None:  # Only add win if not a draw
                     if player_wins:
-                        scoreboard.add_win(player_card, True)
+                        scoreboard.add_win(player_card, True, header)
                     else:
-                        scoreboard.add_win(computer_card, False)
+                        scoreboard.add_win(computer_card, False, header)
 
                 # Check if game is over
                 if scoreboard.player_score >= 4:
@@ -988,7 +1152,6 @@ def start_game():
                         if len(computer_deck) > 0:
                             new_computer_card = deal_cards(computer_deck, 1)[0]
                             computer.add_card(new_computer_card)
-
                     # Reposition all player cards including the new ones
                     dock_start_x = (
                         WINDOW_WIDTH
@@ -1010,7 +1173,11 @@ def start_game():
                             card.set_position(*target_pos)
                             card.original_pos = target_pos
 
+                    # Update round counter
                     header.round += 1
+
+                    # Just call new_round without any additional tracking
+                    scoreboard.new_round()
 
                 # Reset for next round
                 resolving_round = False
