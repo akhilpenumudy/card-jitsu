@@ -41,6 +41,13 @@ RED = (255, 0, 0)
 screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
 pygame.display.set_caption("Card Game")
 
+# Load and scale instructions image
+instructions_img = pygame.image.load("instructions.png")
+instructions_img = pygame.transform.scale(instructions_img, (100, 100))
+instructions_rect = instructions_img.get_rect()
+# Center the image
+instructions_rect.center = (WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2)
+
 
 class Card:
     def __init__(self, suit, value, image_path):
@@ -824,6 +831,9 @@ def main():
 
         # Draw everything
         draw_game_board()
+
+        # Draw instructions image in center
+        screen.blit(instructions_img, instructions_rect)
 
         # Find the currently dragged card (if any)
         dragged_card = None
