@@ -25,7 +25,7 @@ SMALL_CARD_HEIGHT = 32
 END_SCREEN_ANIMATION_DURATION = 1000  # 1 second for fade in
 VICTORY_CARD_SPIN_SPEED = 2  # degrees per frame
 CONFETTI_COUNT = 100
-COMPARISON_PAUSE = 1500  # 1.5 seconds to show the winner
+COMPARISON_PAUSE = 3000  # 3 seconds to show the winner
 WINNER_COLOR = (50, 205, 50)  # Green color for winner highlight
 
 # Colors
@@ -317,6 +317,11 @@ class ComputerPlayer:
         self.hand = hand
         self.play_area = play_area
         self.card_backs = []
+        self.animating_new_card = False
+        self.animation_start = None
+        self.animation_duration = 500  # milliseconds
+        self.animation_start_pos = None
+        self.animation_end_pos = None
         self.update_card_backs()
 
     def update_card_backs(self):
@@ -349,22 +354,81 @@ class ComputerPlayer:
 
     def add_card(self, card):
         self.hand.append(card)
+        # Calculate the position for the new card back
+        dock_start_x = (
+            WINDOW_WIDTH
+            - (CARD_WIDTH * len(self.hand) + CARD_SPACING * (len(self.hand) - 1))
+        ) // 2
+        dock_y = 10 + HEADER_HEIGHT
+        new_pos = (
+            dock_start_x + (len(self.hand) - 1) * (CARD_WIDTH + CARD_SPACING),
+            dock_y,
+        )
+
+        # Start animation
+        self.animating_new_card = True
+        self.animation_start = pygame.time.get_ticks()
+        self.animation_start_pos = (new_pos[0], -CARD_HEIGHT)  # Start above screen
+        self.animation_end_pos = new_pos
+
+        # Update all card backs
         self.update_card_backs()
 
     def play_card(self):
-        # For now, just play a random card
-        if self.hand:
-            chosen_card = random.choice(self.hand)
-            self.hand.remove(chosen_card)
+        # Safety check to prevent crashes
+        if not self.hand:
+            return None
+
+        # Choose a random card from hand
+        chosen_card = random.choice(self.hand)
+
+        # Remove the card from hand
+        self.hand.remove(chosen_card)
+
+        # Update the card backs display
+        self.update_card_backs()
+
+        # Add the card to the play area
+        if chosen_card:
             self.play_area.add_card(chosen_card)
-            self.update_card_backs()
-            return chosen_card
-        return None
+
+        return chosen_card
+
+    def update_animation(self):
+        if not self.animating_new_card:
+            return
+
+        current_time = pygame.time.get_ticks()
+        elapsed = current_time - self.animation_start
+
+        if elapsed >= self.animation_duration:
+            self.animating_new_card = False
+            return
+
+        # Calculate position using easing function
+        progress = elapsed / self.animation_duration
+        # Ease out cubic function
+        progress = 1 - (1 - progress) ** 3
+
+        # Only animate the last card back
+        if self.card_backs:
+            last_card = self.card_backs[-1]
+            x = self.animation_start_pos[0]
+            y = (
+                self.animation_start_pos[1]
+                + (self.animation_end_pos[1] - self.animation_start_pos[1]) * progress
+            )
+            last_card["rect"].topleft = (x, y)
 
     def draw(self, surface):
-        # Draw card backs for remaining cards
-        for card_back in self.card_backs:
-            surface.blit(card_back["image"], card_back["rect"])
+        # Draw all card backs except the last one if animating
+        for i, card_back in enumerate(self.card_backs):
+            if not (self.animating_new_card and i == len(self.card_backs) - 1):
+                surface.blit(card_back["image"], card_back["rect"])
+
+        # Draw the animating card last if there is one
+        if self.animating_new_card and self.card_backs:
+            surface.blit(self.card_backs[-1]["image"], self.card_backs[-1]["rect"])
 
 
 class ScoreBoard:
@@ -605,7 +669,6 @@ def main():
     # Add game state flags
     resolving_round = False
     resolution_start_time = None
-    RESOLUTION_DELAY = 1500  # 1.5 seconds to show the comparison
 
     running = True
     clock = pygame.time.Clock()
@@ -746,9 +809,10 @@ def main():
                 if not header.game_over:
                     header.switch_turn()
 
-        # Update card animations
+        # Update animations
         for card in player_hand:
             card.update_animation()
+        computer.update_animation()
 
         # Handle end screen
         if header.game_over and not end_screen_started:
