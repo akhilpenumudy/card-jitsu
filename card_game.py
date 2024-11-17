@@ -3,6 +3,7 @@ import sys
 import random
 import os
 import math
+from network import NetworkGame
 
 # Initialize Pygame
 pygame.init()
@@ -76,6 +77,9 @@ class Card:
         surface.blit(self.image, self.rect)
 
     def handle_event(self, event, play_area, go_button):
+        if not hasattr(self, "dragging"):
+            self.dragging = False
+
         if event.type == pygame.MOUSEBUTTONDOWN:
             if self.rect.collidepoint(event.pos):
                 self.dragging = True
@@ -209,6 +213,9 @@ class PlayArea:
         self.highlight_color = WINNER_COLOR
 
     def add_card(self, card):
+        # Remove existing card if there is one
+        if self.card:
+            self.remove_card()
         self.card = card
         # Center the card in the play area
         card.rect.centerx = self.rect.centerx
@@ -808,9 +815,28 @@ class TitleScreen:
         self.font_info = pygame.font.Font(None, 36)
         self.background_color = (135, 206, 235)
         self.title_color = (255, 215, 0)
-        self.start_button = StartButton(
-            WINDOW_WIDTH // 2 - 100, WINDOW_HEIGHT // 2 + 50, 200, 60
+
+        # Create buttons for different game modes
+        button_width = 400
+        button_height = 60
+        button_spacing = 20
+        start_y = WINDOW_HEIGHT // 2 + 50
+
+        # Center all buttons horizontally
+        center_x = WINDOW_WIDTH // 2 - button_width // 2
+
+        self.singleplayer_button = StartButton(
+            center_x, start_y, button_width, button_height, "VS COMPUTER"
         )
+
+        self.multiplayer_button = StartButton(
+            center_x,
+            start_y + button_height + button_spacing,
+            button_width,
+            button_height,
+            "PLAY ONLINE",
+        )
+
         self.info_button = InfoButton(WINDOW_WIDTH - 50, 20, 30, 30)
         self.show_info = False
         self.info_popup = InfoPopup()
@@ -837,10 +863,9 @@ class TitleScreen:
         # Draw main title
         surface.blit(title_text, title_pos)
 
-        # Draw start button
-        self.start_button.draw(surface)
-
-        # Draw info button
+        # Draw buttons
+        self.singleplayer_button.draw(surface)
+        self.multiplayer_button.draw(surface)
         self.info_button.draw(surface)
 
         # Draw info popup if active
@@ -851,28 +876,34 @@ class TitleScreen:
         if self.show_info:
             if self.info_popup.handle_event(event):
                 self.show_info = False
-                return False
+                return None
         else:
             if self.info_button.handle_event(event):
                 self.show_info = True
-                return False
-            return self.start_button.handle_event(event)
-        return False
+                return None
+
+            # Check which button was clicked
+            if self.singleplayer_button.handle_event(event):
+                return "singleplayer"
+            if self.multiplayer_button.handle_event(event):
+                return "multiplayer"
+        return None
 
 
 class StartButton:
-    def __init__(self, x, y, width, height):
+    def __init__(self, x, y, width, height, text="START"):
         self.rect = pygame.Rect(x, y, width, height)
         self.font = pygame.font.Font(None, 48)
         self.color = (50, 205, 50)  # Green
         self.hover = False
+        self.text = text
 
     def draw(self, surface):
         color = (60, 235, 60) if self.hover else self.color
         pygame.draw.rect(surface, color, self.rect)
         pygame.draw.rect(surface, BLACK, self.rect, 2)
 
-        text = self.font.render("START", True, BLACK)
+        text = self.font.render(self.text, True, BLACK)
         text_rect = text.get_rect(center=self.rect.center)
         surface.blit(text, text_rect)
 
@@ -989,6 +1020,200 @@ class InfoPopup:
             ):
                 return True
         return False
+
+
+class PlayerLoginScreen:
+    def __init__(self):
+        self.font_title = pygame.font.Font(None, 64)
+        self.font_text = pygame.font.Font(None, 36)
+        self.background_color = (135, 206, 235)
+        self.input_box = pygame.Rect(
+            WINDOW_WIDTH // 2 - 100, WINDOW_HEIGHT // 2, 200, 32
+        )
+        self.color_inactive = pygame.Color("lightskyblue3")
+        self.color_active = pygame.Color("dodgerblue2")
+        self.color = self.color_inactive
+        self.text = ""
+        self.active = False
+        self.done = False
+
+        # Create join button
+        self.join_button = StartButton(
+            WINDOW_WIDTH // 2 - 100, WINDOW_HEIGHT // 2 + 50, 200, 50, "JOIN GAME"
+        )
+        self.join_button.active = False  # Disable until name is entered
+
+    def handle_event(self, event):
+        if event.type == pygame.MOUSEBUTTONDOWN:
+            if self.input_box.collidepoint(event.pos):
+                self.active = True
+            else:
+                self.active = False
+            self.color = self.color_active if self.active else self.color_inactive
+
+            # Check if join button is clicked
+            if self.join_button.active and self.join_button.handle_event(event):
+                return self.text  # Return the player's name
+
+        if event.type == pygame.KEYDOWN:
+            if self.active:
+                if event.key == pygame.K_RETURN and self.text.strip():
+                    return self.text
+                elif event.key == pygame.K_BACKSPACE:
+                    self.text = self.text[:-1]
+                else:
+                    # Only allow reasonable name lengths
+                    if len(self.text) < 12:
+                        self.text += event.unicode
+
+                # Enable join button if text is not empty
+                self.join_button.active = bool(self.text.strip())
+
+        return None
+
+    def draw(self, screen):
+        screen.fill(self.background_color)
+
+        # Draw title
+        title_text = self.font_title.render("Enter Your Name", True, (255, 215, 0))
+        title_rect = title_text.get_rect(
+            center=(WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2 - 100)
+        )
+        screen.blit(title_text, title_rect)
+
+        # Draw input box
+        txt_surface = self.font_text.render(self.text, True, self.color)
+        width = max(200, txt_surface.get_width() + 10)
+        self.input_box.w = width
+        self.input_box.centerx = WINDOW_WIDTH // 2
+        pygame.draw.rect(screen, self.color, self.input_box, 2)
+        screen.blit(txt_surface, (self.input_box.x + 5, self.input_box.y + 5))
+
+        # Draw join button
+        self.join_button.draw(screen)
+
+
+class WaitingScreen:
+    def __init__(self, player_name):
+        self.font_title = pygame.font.Font(None, 64)
+        self.font_text = pygame.font.Font(None, 36)
+        self.background_color = (135, 206, 235)
+        self.player_name = player_name
+        self.dots = ""
+        self.dot_timer = 0
+
+    def update(self):
+        self.dot_timer += 1
+        if self.dot_timer > 30:  # Update dots every half second
+            self.dots = "." * ((len(self.dots) + 1) % 4)
+            self.dot_timer = 0
+
+    def draw(self, screen):
+        screen.fill(self.background_color)
+
+        # Draw welcome message
+        welcome_text = self.font_title.render(
+            f"Welcome, {self.player_name}!", True, (255, 215, 0)
+        )
+        welcome_rect = welcome_text.get_rect(
+            center=(WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2 - 100)
+        )
+        screen.blit(welcome_text, welcome_rect)
+
+        # Draw waiting message with animated dots
+        waiting_text = self.font_text.render(
+            f"Waiting for opponent{self.dots}", True, BLACK
+        )
+        waiting_rect = waiting_text.get_rect(
+            center=(WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2)
+        )
+        screen.blit(waiting_text, waiting_rect)
+
+
+class LobbyScreen:
+    def __init__(self, player_name, network):
+        self.font_title = pygame.font.Font(None, 64)
+        self.font_text = pygame.font.Font(None, 36)
+        self.background_color = (135, 206, 235)
+        self.player_name = player_name
+        self.network = network
+        self.status_message = "Connecting to server..."
+        self.dots = ""
+        self.dot_timer = 0
+        self.connection_status = "connecting"  # connecting, waiting, matched, error
+
+    def update(self):
+        self.dot_timer += 1
+        if self.dot_timer > 30:
+            self.dots = "." * ((len(self.dots) + 1) % 4)
+            self.dot_timer = 0
+
+        # Check server status
+        try:
+            response = self.network.send("get_status")
+            print(f"Lobby update response: {response}")  # Debug print
+
+            if response:
+                if response.get("status") == "waiting":
+                    self.connection_status = "waiting"
+                    self.status_message = "Waiting for opponent"
+                    return False
+                elif response.get("status") in [
+                    "starting",
+                    "game_started",
+                    "in_game",
+                ]:  # Add these conditions
+                    print("Game is starting!")  # Debug print
+                    print(f"Game data received: {response}")  # Debug print
+                    self.connection_status = "matched"
+                    self.status_message = "Opponent found! Starting game..."
+                    # Store game data
+                    if "game_id" in response:
+                        self.network.game_id = response["game_id"]
+                    if "player_num" in response:
+                        self.network.player_num = response["player_num"]
+                    if "game_state" in response:
+                        self.network.game_state = response["game_state"]
+                    return True
+
+            if not self.network.connected:
+                print("Lost connection to server")  # Debug print
+                self.connection_status = "error"
+                self.status_message = "Lost connection to server"
+                return False
+
+        except Exception as e:
+            print(f"Network error in lobby: {e}")
+            self.network.connected = False
+            self.connection_status = "error"
+            self.status_message = "Connection error"
+            return False
+
+        return False
+
+    def draw(self, screen):
+        screen.fill(self.background_color)
+
+        # Draw title
+        title_text = self.font_title.render("Game Lobby", True, (255, 215, 0))
+        title_rect = title_text.get_rect(center=(WINDOW_WIDTH // 2, WINDOW_HEIGHT // 4))
+        screen.blit(title_text, title_rect)
+
+        # Draw player name
+        name_text = self.font_text.render(f"Player: {self.player_name}", True, BLACK)
+        name_rect = name_text.get_rect(
+            center=(WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2 - 50)
+        )
+        screen.blit(name_text, name_rect)
+
+        # Draw status message with dots
+        status_text = self.font_text.render(
+            f"{self.status_message}{self.dots}", True, BLACK
+        )
+        status_rect = status_text.get_rect(
+            center=(WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2 + 50)
+        )
+        screen.blit(status_text, status_rect)
 
 
 def start_game():
@@ -1254,31 +1479,383 @@ def start_game():
     sys.exit()
 
 
-def main():
-    # Create title screen
-    title_screen = TitleScreen()
-    game_started = False
-
+def start_online_game():
+    # Show login screen first
+    login_screen = PlayerLoginScreen()
+    player_name = None
     running = True
     clock = pygame.time.Clock()
 
-    while running and not game_started:
+    # Get player name
+    while running and player_name is None:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
-            if title_screen.handle_event(event):
-                game_started = True
+
+            result = login_screen.handle_event(event)
+            if result:
+                player_name = result
+
+        login_screen.draw(screen)
+        pygame.display.flip()
+        clock.tick(60)
+
+    if player_name and running:
+        network = NetworkGame()
+        if network.connect():
+            # Send player name to server
+            network.send(player_name)
+
+            # Enter lobby
+            lobby = LobbyScreen(player_name, network)
+            in_lobby = True
+
+            while running and in_lobby:
+                for event in pygame.event.get():
+                    if event.type == pygame.QUIT:
+                        running = False
+
+                # Update lobby and check for game start
+                if lobby.update():
+                    in_lobby = False
+                    # Start multiplayer game
+                    start_multiplayer_game(network, player_name)
+
+                lobby.draw(screen)
+                pygame.display.flip()
+                clock.tick(60)
+        else:
+            print("Failed to connect to server")
+
+
+def start_multiplayer_game(network, player_name):
+    try:
+        # Wait for game start confirmation
+        response = network.send("ready")
+        print(
+            f"Waiting for game start confirmation... Response: {response}"
+        )  # Debug print
+
+        # Modified this check to accept both "game_started" and "in_game" status
+        if not response or (response.get("status") not in ["game_started", "in_game"]):
+            print(
+                f"Failed to start game. Status: {response.get('status') if response else 'No response'}"
+            )
+            return
+
+        # Create play areas
+        player_play_area = PlayArea(
+            50, WINDOW_HEIGHT // 2 - CARD_HEIGHT // 2, CARD_WIDTH + 20, CARD_HEIGHT + 20
+        )
+        opponent_play_area = PlayArea(
+            WINDOW_WIDTH - CARD_WIDTH - 70,
+            WINDOW_HEIGHT // 2 - CARD_HEIGHT // 2,
+            CARD_WIDTH + 20,
+            CARD_HEIGHT + 20,
+        )
+
+        # Create the scoreboard
+        scoreboard = ScoreBoard()
+
+        # Create the GO button
+        go_button = Button(
+            WINDOW_WIDTH - 120, WINDOW_HEIGHT - 70, BUTTON_WIDTH, BUTTON_HEIGHT
+        )
+
+        # Get initial game state
+        game_state = network.game_state
+        if not game_state:
+            print("No initial game state received")
+            return
+
+        print(f"Initial game state: {game_state}")  # Debug print
+        print(f"Player number: {network.player_num}")  # Debug print
+
+        # Set up initial turn based on server's choice
+        is_my_turn = game_state["current_turn"] == player_name
+        if network.player_num == 1:
+            opponent_name = game_state["player2"]["name"]
+        else:
+            opponent_name = game_state["player1"]["name"]
+        print(
+            f"My name: {player_name}, Opponent name: {opponent_name}, Current turn: {game_state['current_turn']}"
+        )
+
+        # Create the header
+        header = Header()
+        header.is_player_turn = is_my_turn
+        header.current_turn = "YOUR TURN" if is_my_turn else f"{opponent_name}'s TURN"
+        print(
+            f"Initial turn state - Is my turn: {header.is_player_turn}, Header: {header.current_turn}"
+        )
+
+        # Create player hand from server data
+        player_hand = []
+        if network.player_num == 1:
+            hand_data = game_state["player1"]["hand"]
+        else:
+            hand_data = game_state["player2"]["hand"]
+
+        # Convert server card data to Card objects
+        for suit, value in hand_data:
+            image_path = os.path.join(
+                "Cards (large)", f"card_{suit}_{str(value).zfill(2)}.png"
+            )
+            card = Card(suit, value, image_path)
+            player_hand.append(card)
+
+        # Position cards
+        dock_start_x = (
+            WINDOW_WIDTH
+            - (CARD_WIDTH * len(player_hand) + CARD_SPACING * (len(player_hand) - 1))
+        ) // 2
+        dock_y = WINDOW_HEIGHT - DOCK_HEIGHT + 25
+
+        for i, card in enumerate(player_hand):
+            card.set_position(dock_start_x + i * (CARD_WIDTH + CARD_SPACING), dock_y)
+
+        # Add timer variables
+        turn_timer = TIMER_DURATION  # 20 seconds
+        last_timer_update = pygame.time.get_ticks()
+
+        running = True
+        clock = pygame.time.Clock()
+
+        # Load face-down card image
+        card_back_image = pygame.image.load(
+            os.path.join("Cards (large)", "card_back.png")
+        )
+        card_back_image = pygame.transform.scale(
+            card_back_image, (CARD_WIDTH, CARD_HEIGHT)
+        )
+
+        while running:
+            current_time = pygame.time.get_ticks()
+
+            # Update game state
+            try:
+                updated_state = network.send("get_state")
+                if updated_state and isinstance(updated_state, dict):
+                    if updated_state.get("status") == "in_game":
+                        new_state = updated_state.get("game_state", game_state)
+
+                        # Check if opponent played a card
+                        opponent_played_card = None
+                        if network.player_num == 1:
+                            opponent_played_card = new_state["player2"]["played_card"]
+                        else:
+                            opponent_played_card = new_state["player1"]["played_card"]
+
+                        # Update opponent's play area if they played a card
+                        if opponent_played_card and not opponent_play_area.card:
+                            # Create a face-down card initially
+                            face_down_card = Card(
+                                "back",
+                                0,
+                                os.path.join("Cards (large)", "card_back.png"),
+                            )
+                            opponent_play_area.add_card(face_down_card)
+                            print("Showing opponent's face-down card")
+
+                        # Check if both players have played
+                        both_played = (
+                            new_state["player1"]["played_card"] is not None
+                            and new_state["player2"]["played_card"] is not None
+                        )
+
+                        if both_played:
+                            # Get opponent's actual card and reveal it
+                            if network.player_num == 1:
+                                opp_card = new_state["player2"]["played_card"]
+                            else:
+                                opp_card = new_state["player1"]["played_card"]
+
+                            # Show actual card immediately when both have played
+                            if opp_card:
+                                opp_card_obj = Card(
+                                    opp_card[0],
+                                    opp_card[1],
+                                    os.path.join(
+                                        "Cards (large)",
+                                        f"card_{opp_card[0]}_{str(opp_card[1]).zfill(2)}.png",
+                                    ),
+                                )
+                                opponent_play_area.add_card(opp_card_obj)
+                                print("Revealing opponent's actual card for comparison")
+
+                            # Handle round result and winner display
+                            if new_state.get("round_result") and new_state["round_result"] != game_state.get("round_result"):
+                                round_result = new_state["round_result"]
+                                winner = round_result["winner"]
+                                
+                                print(f"Processing round result. Winner: {winner}")  # Debug print
+                                
+                                # Update play area highlights
+                                if network.player_num == 1:
+                                    player_play_area.highlight = winner == "player1"
+                                    opponent_play_area.highlight = winner == "player2"
+                                else:
+                                    player_play_area.highlight = winner == "player2"
+                                    opponent_play_area.highlight = winner == "player1"
+                                
+                                # Update scoreboard with winning card
+                                if (network.player_num == 1 and winner == "player1") or (network.player_num == 2 and winner == "player2"):
+                                    winning_card = player_play_area.card
+                                    scoreboard.add_win(winning_card, True, header)
+                                    print("Added winning card to player's scoreboard")
+                                else:
+                                    winning_card = opponent_play_area.card
+                                    scoreboard.add_win(winning_card, False, header)
+                                    print("Added winning card to opponent's scoreboard")
+                                
+                                # Show comparison for a moment
+                                pygame.time.wait(COMPARISON_PAUSE)
+                                print("Comparison pause complete")
+                                
+                                # Clear play areas and reset highlights
+                                player_play_area.remove_card()
+                                opponent_play_area.remove_card()
+                                player_play_area.highlight = False
+                                opponent_play_area.highlight = False
+                                
+                                # Update round counter
+                                header.round = new_state.get("round", 1)
+                                
+                                # Update player's hand with new cards
+                                if network.player_num == 1:
+                                    hand_data = new_state["player1"]["hand"]
+                                else:
+                                    hand_data = new_state["player2"]["hand"]
+                                
+                                # Convert new hand data to Card objects and position them
+                                player_hand = []
+                                for suit, value in hand_data:
+                                    image_path = os.path.join("Cards (large)", f"card_{suit}_{str(value).zfill(2)}.png")
+                                    card = Card(suit, value, image_path)
+                                    player_hand.append(card)
+                                
+                                # Position new cards
+                                dock_start_x = (WINDOW_WIDTH - (CARD_WIDTH * len(player_hand) + CARD_SPACING * (len(player_hand) - 1))) // 2
+                                dock_y = WINDOW_HEIGHT - DOCK_HEIGHT + 25
+                                
+                                for i, card in enumerate(player_hand):
+                                    card.set_position(dock_start_x + i * (CARD_WIDTH + CARD_SPACING), dock_y)
+                                
+                                print(f"Round {header.round} starting with new cards")
+
+                        # Check if turn changed
+                        if new_state["current_turn"] != game_state["current_turn"]:
+                            is_my_turn = new_state["current_turn"] == player_name
+                            header.is_player_turn = is_my_turn
+                            header.current_turn = (
+                                "YOUR TURN" if is_my_turn else f"{opponent_name}'s TURN"
+                            )
+
+                            if is_my_turn:
+                                turn_timer = TIMER_DURATION
+                                last_timer_update = current_time
+
+                            print(f"Turn changed to: {header.current_turn}")
+
+                        game_state = new_state
+            except Exception as e:
+                print(f"Error updating game state: {e}")
+                print(f"Current state: {game_state}")
+                running = False
+
+            # Update timer only if it's player's turn
+            if header.is_player_turn:
+                if current_time - last_timer_update >= 1000:
+                    turn_timer -= 1
+                    last_timer_update = current_time
+                    print(
+                        f"Timer update - Player: {player_name}, Time left: {turn_timer}"
+                    )
+
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    running = False
+
+                # Only handle events if it's player's turn
+                if header.is_player_turn:
+                    # Handle card dragging
+                    for card in player_hand[:]:
+                        if card.handle_event(event, player_play_area, go_button):
+                            break
+
+                    # Handle GO button
+                    if event.type == pygame.MOUSEBUTTONDOWN and go_button.active:
+                        if go_button.rect.collidepoint(event.pos):
+                            if player_play_area.card:
+                                print(f"Player {player_name} pressed GO button")
+                                network.play_card(
+                                    (
+                                        player_play_area.card.suit,
+                                        player_play_area.card.value,
+                                    )
+                                )
+                                if player_play_area.card in player_hand:
+                                    player_hand.remove(player_play_area.card)
+                                header.is_player_turn = False
+                                header.current_turn = f"{opponent_name}'s TURN"
+                                go_button.active = False
+                                print(f"Turn switched to {opponent_name}")
+
+            # Draw everything
+            draw_game_board()
+
+            # Update header timer
+            header.timer.time_left = turn_timer
+
+            # Draw all game elements
+            for card in player_hand:
+                if not card.dragging:
+                    card.draw(screen)
+
+            player_play_area.draw(screen)
+            opponent_play_area.draw(screen)
+            go_button.draw(screen)
+            header.draw(screen)
+            scoreboard.draw(screen)
+
+            pygame.display.flip()
+            clock.tick(60)
+
+    except Exception as e:
+        print(f"Error in multiplayer game: {e}")
+        print(f"Game state: {network.game_state}")
+
+
+def main():
+    # Create title screen
+    title_screen = TitleScreen()
+    game_mode = None
+    running = True
+    clock = pygame.time.Clock()
+
+    while running and game_mode is None:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+
+            # Handle title screen events
+            result = title_screen.handle_event(event)
+            if result:
+                game_mode = result
 
         # Draw title screen
         title_screen.draw(screen)
         pygame.display.flip()
         clock.tick(60)
 
-    if game_started:
-        start_game()  # This will contain all the existing game code
-    else:
-        pygame.quit()
-        sys.exit()
+    if running:
+        if game_mode == "singleplayer":
+            start_game()  # Existing single player game
+        elif game_mode == "multiplayer":
+            start_online_game()
+
+    pygame.quit()
+    sys.exit()
 
 
 if __name__ == "__main__":
