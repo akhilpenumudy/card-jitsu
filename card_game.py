@@ -1433,7 +1433,7 @@ def start_game():
         # Find the currently dragged card (if any)
         dragged_card = None
         for card in player_hand:
-            if hasattr(card, "dragging") and card.dragging:
+            if card.dragging:
                 dragged_card = card
                 break
 
@@ -1610,10 +1610,149 @@ def start_multiplayer_game(network, player_name):
         running = True
         clock = pygame.time.Clock()
 
+        # Load face-down card image
+        card_back_image = pygame.image.load(
+            os.path.join("Cards (large)", "card_back.png")
+        )
+        card_back_image = pygame.transform.scale(
+            card_back_image, (CARD_WIDTH, CARD_HEIGHT)
+        )
+
         while running:
             current_time = pygame.time.get_ticks()
-            
-            # Update timer if it's player's turn
+
+            # Update game state
+            try:
+                updated_state = network.send("get_state")
+                if updated_state and isinstance(updated_state, dict):
+                    if updated_state.get("status") == "in_game":
+                        new_state = updated_state.get("game_state", game_state)
+
+                        # Check if opponent played a card
+                        opponent_played_card = None
+                        if network.player_num == 1:
+                            opponent_played_card = new_state["player2"]["played_card"]
+                        else:
+                            opponent_played_card = new_state["player1"]["played_card"]
+
+                        # Update opponent's play area if they played a card
+                        if opponent_played_card and not opponent_play_area.card:
+                            # Create a face-down card initially
+                            face_down_card = Card(
+                                "back",
+                                0,
+                                os.path.join("Cards (large)", "card_back.png"),
+                            )
+                            opponent_play_area.add_card(face_down_card)
+                            print("Showing opponent's face-down card")
+
+                        # Check if both players have played
+                        both_played = (
+                            new_state["player1"]["played_card"] is not None
+                            and new_state["player2"]["played_card"] is not None
+                        )
+
+                        if both_played:
+                            # Get opponent's actual card and reveal it
+                            if network.player_num == 1:
+                                opp_card = new_state["player2"]["played_card"]
+                            else:
+                                opp_card = new_state["player1"]["played_card"]
+
+                            # Show actual card immediately when both have played
+                            if opp_card:
+                                opp_card_obj = Card(
+                                    opp_card[0],
+                                    opp_card[1],
+                                    os.path.join(
+                                        "Cards (large)",
+                                        f"card_{opp_card[0]}_{str(opp_card[1]).zfill(2)}.png",
+                                    ),
+                                )
+                                opponent_play_area.add_card(opp_card_obj)
+                                print("Revealing opponent's actual card for comparison")
+
+                            # Handle round result and winner display
+                            if new_state.get("round_result") and new_state["round_result"] != game_state.get("round_result"):
+                                round_result = new_state["round_result"]
+                                winner = round_result["winner"]
+                                
+                                print(f"Processing round result. Winner: {winner}")  # Debug print
+                                
+                                # Update play area highlights
+                                if network.player_num == 1:
+                                    player_play_area.highlight = winner == "player1"
+                                    opponent_play_area.highlight = winner == "player2"
+                                else:
+                                    player_play_area.highlight = winner == "player2"
+                                    opponent_play_area.highlight = winner == "player1"
+                                
+                                # Update scoreboard with winning card
+                                if (network.player_num == 1 and winner == "player1") or (network.player_num == 2 and winner == "player2"):
+                                    winning_card = player_play_area.card
+                                    scoreboard.add_win(winning_card, True, header)
+                                    print("Added winning card to player's scoreboard")
+                                else:
+                                    winning_card = opponent_play_area.card
+                                    scoreboard.add_win(winning_card, False, header)
+                                    print("Added winning card to opponent's scoreboard")
+                                
+                                # Show comparison for a moment
+                                pygame.time.wait(COMPARISON_PAUSE)
+                                print("Comparison pause complete")
+                                
+                                # Clear play areas and reset highlights
+                                player_play_area.remove_card()
+                                opponent_play_area.remove_card()
+                                player_play_area.highlight = False
+                                opponent_play_area.highlight = False
+                                
+                                # Update round counter
+                                header.round = new_state.get("round", 1)
+                                
+                                # Update player's hand with new cards
+                                if network.player_num == 1:
+                                    hand_data = new_state["player1"]["hand"]
+                                else:
+                                    hand_data = new_state["player2"]["hand"]
+                                
+                                # Convert new hand data to Card objects and position them
+                                player_hand = []
+                                for suit, value in hand_data:
+                                    image_path = os.path.join("Cards (large)", f"card_{suit}_{str(value).zfill(2)}.png")
+                                    card = Card(suit, value, image_path)
+                                    player_hand.append(card)
+                                
+                                # Position new cards
+                                dock_start_x = (WINDOW_WIDTH - (CARD_WIDTH * len(player_hand) + CARD_SPACING * (len(player_hand) - 1))) // 2
+                                dock_y = WINDOW_HEIGHT - DOCK_HEIGHT + 25
+                                
+                                for i, card in enumerate(player_hand):
+                                    card.set_position(dock_start_x + i * (CARD_WIDTH + CARD_SPACING), dock_y)
+                                
+                                print(f"Round {header.round} starting with new cards")
+
+                        # Check if turn changed
+                        if new_state["current_turn"] != game_state["current_turn"]:
+                            is_my_turn = new_state["current_turn"] == player_name
+                            header.is_player_turn = is_my_turn
+                            header.current_turn = (
+                                "YOUR TURN" if is_my_turn else f"{opponent_name}'s TURN"
+                            )
+
+                            if is_my_turn:
+                                turn_timer = TIMER_DURATION
+                                last_timer_update = current_time
+
+                            print(f"Turn changed to: {header.current_turn}")
+
+                        game_state = new_state
+            except Exception as e:
+                print(f"Error updating game state: {e}")
+                print(f"Current state: {game_state}")
+                running = False
+
+            # Update timer only if it's player's turn
             if header.is_player_turn:
                 if current_time - last_timer_update >= 1000:
                     turn_timer -= 1
