@@ -101,13 +101,15 @@ class GameSession:
             "highlight_winner": True,
         }
 
-        # Reset played cards and deal new ones
-        self.game_state["player1"]["played_card"] = None
-        self.game_state["player2"]["played_card"] = None
+        # Deal replacement cards
         self.deal_replacement_cards()
 
         # Update round counter
         self.game_state["round"] = self.game_state.get("round", 1) + 1
+
+        # Reset played cards
+        self.game_state["player1"]["played_card"] = None
+        self.game_state["player2"]["played_card"] = None
 
         # Set next turn to the loser
         self.game_state["current_turn"] = self.game_state[
@@ -259,14 +261,6 @@ class GameServer:
     def handle_game_client(self, conn, game_id, player_num):
         game = self.games[game_id]
 
-        # Send confirmation message first
-        try:
-            conn.send(pickle.dumps({"status": "game_started"}))
-            print(f"Sent game start confirmation to player {player_num}")
-        except Exception as e:
-            print(f"Error sending game start confirmation: {e}")
-            return
-
         while True:
             try:
                 # Keep connection alive with periodic updates
@@ -288,11 +282,7 @@ class GameServer:
                     # Handle game actions
                     if isinstance(data, dict) and data.get("action") == "play_card":
                         card = data.get("card")
-                        player_name = (
-                            game.player1["name"]
-                            if player_num == 1
-                            else game.player2["name"]
-                        )
+                        player_name = game.player1["name"] if player_num == 1 else game.player2["name"]
 
                         # Only allow card play if it's player's turn
                         if game.game_state["current_turn"] == player_name:
@@ -304,29 +294,53 @@ class GameServer:
                                 game.game_state["player2"]["played_card"] = card
                                 game.game_state["current_turn"] = game.player1["name"]
 
-                            # Check if both players have played
-                            if (
-                                game.game_state["player1"]["played_card"]
-                                and game.game_state["player2"]["played_card"]
-                            ):
-                                # Add delay before comparison
-                                time.sleep(1)
-                                winner = game.compare_cards()
-                                print(f"Round complete. Winner: {winner}")
+                            print(f"Player {player_name} played card: {card}")
+                            print(f"Turn switched to: {game.game_state['current_turn']}")
 
-                            # Send updated state to both players
+                            # Send update about played card to both players
                             turn_update = {
                                 "status": "in_game",
-                                "game_state": game.game_state,
+                                "game_state": game.game_state
                             }
                             game.player1["conn"].send(pickle.dumps(turn_update))
                             game.player2["conn"].send(pickle.dumps(turn_update))
+
+                            # Check if both players have played
+                            if (game.game_state["player1"]["played_card"] and 
+                                game.game_state["player2"]["played_card"]):
+                                # Add delay before comparison
+                                time.sleep(1)
+                                
+                                # First send state to reveal both cards
+                                reveal_state = {
+                                    "status": "in_game",
+                                    "game_state": game.game_state,
+                                    "reveal_cards": True
+                                }
+                                game.player1["conn"].send(pickle.dumps(reveal_state))
+                                game.player2["conn"].send(pickle.dumps(reveal_state))
+                                
+                                # Wait for cards to be shown
+                                time.sleep(2)
+                                
+                                # Compare cards and determine winner
+                                winner = game.compare_cards()
+                                print(f"Round complete. Winner: {winner}")
+                                
+                                # Send final round result
+                                result_update = {
+                                    "status": "in_game",
+                                    "game_state": game.game_state
+                                }
+                                game.player1["conn"].send(pickle.dumps(result_update))
+                                game.player2["conn"].send(pickle.dumps(result_update))
+                                print("Sent round result to both players")
 
                 except Exception as e:
                     print(f"Error in game loop: {e}")
                     break
 
-                time.sleep(0.1)  # Short delay to prevent CPU overload
+                time.sleep(0.1)
 
             except Exception as e:
                 print(f"Lost connection to player {player_num}: {e}")

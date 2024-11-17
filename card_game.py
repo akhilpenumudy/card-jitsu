@@ -1434,7 +1434,7 @@ def start_game():
         # Find the currently dragged card (if any)
         dragged_card = None
         for card in player_hand:
-            if card.dragging:
+            if hasattr(card, 'dragging') and card.dragging:
                 dragged_card = card
                 break
 
@@ -1620,17 +1620,17 @@ def start_multiplayer_game(network, player_name):
 
         running = True
         clock = pygame.time.Clock()
-
-        # Load face-down card image
-        card_back_image = pygame.image.load(
-            os.path.join("Cards (large)", "card_back.png")
-        )
-        card_back_image = pygame.transform.scale(
-            card_back_image, (CARD_WIDTH, CARD_HEIGHT)
-        )
+        dragged_card = None
 
         while running:
             current_time = pygame.time.get_ticks()
+
+            # Find currently dragged card
+            dragged_card = None
+            for card in player_hand:
+                if hasattr(card, 'dragging') and card.dragging:
+                    dragged_card = card
+                    break
 
             # Update game state
             try:
@@ -1638,58 +1638,43 @@ def start_multiplayer_game(network, player_name):
                 if updated_state and isinstance(updated_state, dict):
                     if updated_state.get("status") == "in_game":
                         new_state = updated_state.get("game_state", game_state)
-
-                        # Check if opponent played a card
-                        opponent_played_card = None
+                        
+                        # Check for opponent's played card
                         if network.player_num == 1:
-                            opponent_played_card = new_state["player2"]["played_card"]
+                            opponent_played = new_state["player2"]["played_card"] is not None
+                            opponent_card = new_state["player2"]["played_card"]
                         else:
-                            opponent_played_card = new_state["player1"]["played_card"]
+                            opponent_played = new_state["player1"]["played_card"] is not None
+                            opponent_card = new_state["player1"]["played_card"]
 
-                        # Update opponent's play area if they played a card
-                        if opponent_played_card and not opponent_play_area.card:
-                            # Create a face-down card initially
-                            face_down_card = Card(
-                                "back",
-                                0,
-                                os.path.join("Cards (large)", "card_back.png"),
-                            )
+                        # Show face-down card when opponent plays
+                        if opponent_played and not opponent_play_area.card:
+                            face_down_card = Card("back", 0, os.path.join("Cards (large)", "card_back.png"))
                             opponent_play_area.add_card(face_down_card)
                             print("Showing opponent's face-down card")
 
                         # Check if both players have played
-                        both_played = (
-                            new_state["player1"]["played_card"] is not None
-                            and new_state["player2"]["played_card"] is not None
-                        )
+                        both_played = (new_state["player1"]["played_card"] and 
+                                     new_state["player2"]["played_card"])
 
                         if both_played:
-                            # Get opponent's actual card and reveal it
-                            if network.player_num == 1:
-                                opp_card = new_state["player2"]["played_card"]
-                            else:
-                                opp_card = new_state["player1"]["played_card"]
-
-                            # Show actual card immediately when both have played
-                            if opp_card:
+                            # Reveal opponent's actual card
+                            if opponent_card:
                                 opp_card_obj = Card(
-                                    opp_card[0],
-                                    opp_card[1],
-                                    os.path.join(
-                                        "Cards (large)",
-                                        f"card_{opp_card[0]}_{str(opp_card[1]).zfill(2)}.png",
-                                    ),
+                                    opponent_card[0],
+                                    opponent_card[1],
+                                    os.path.join("Cards (large)", 
+                                        f"card_{opponent_card[0]}_{str(opponent_card[1]).zfill(2)}.png")
                                 )
                                 opponent_play_area.add_card(opp_card_obj)
                                 print("Revealing opponent's actual card for comparison")
 
-                            # Handle round result and winner display
+                            # Handle round result
                             if new_state.get("round_result") and new_state["round_result"] != game_state.get("round_result"):
                                 round_result = new_state["round_result"]
                                 winner = round_result["winner"]
-                                
-                                print(f"Processing round result. Winner: {winner}")  # Debug print
-                                
+                                print(f"Processing round result. Winner: {winner}")
+
                                 # Update play area highlights
                                 if network.player_num == 1:
                                     player_play_area.highlight = winner == "player1"
@@ -1697,51 +1682,28 @@ def start_multiplayer_game(network, player_name):
                                 else:
                                     player_play_area.highlight = winner == "player2"
                                     opponent_play_area.highlight = winner == "player1"
-                                
-                                # Update scoreboard with winning card
-                                if (network.player_num == 1 and winner == "player1") or (network.player_num == 2 and winner == "player2"):
-                                    winning_card = player_play_area.card
-                                    scoreboard.add_win(winning_card, True, header)
-                                    print("Added winning card to player's scoreboard")
-                                else:
-                                    winning_card = opponent_play_area.card
-                                    scoreboard.add_win(winning_card, False, header)
-                                    print("Added winning card to opponent's scoreboard")
-                                
+
                                 # Show comparison for a moment
                                 pygame.time.wait(COMPARISON_PAUSE)
                                 print("Comparison pause complete")
-                                
+
+                                # Update scoreboard with winning card
+                                if (network.player_num == 1 and winner == "player1") or \
+                                   (network.player_num == 2 and winner == "player2"):
+                                    winning_card = player_play_area.card
+                                    scoreboard.add_win(winning_card, True, header)
+                                else:
+                                    winning_card = opponent_play_area.card
+                                    scoreboard.add_win(winning_card, False, header)
+
                                 # Clear play areas and reset highlights
                                 player_play_area.remove_card()
                                 opponent_play_area.remove_card()
                                 player_play_area.highlight = False
                                 opponent_play_area.highlight = False
-                                
-                                # Update round counter
+
+                                # Update round counter and hands
                                 header.round = new_state.get("round", 1)
-                                
-                                # Update player's hand with new cards
-                                if network.player_num == 1:
-                                    hand_data = new_state["player1"]["hand"]
-                                else:
-                                    hand_data = new_state["player2"]["hand"]
-                                
-                                # Convert new hand data to Card objects and position them
-                                player_hand = []
-                                for suit, value in hand_data:
-                                    image_path = os.path.join("Cards (large)", f"card_{suit}_{str(value).zfill(2)}.png")
-                                    card = Card(suit, value, image_path)
-                                    player_hand.append(card)
-                                
-                                # Position new cards
-                                dock_start_x = (WINDOW_WIDTH - (CARD_WIDTH * len(player_hand) + CARD_SPACING * (len(player_hand) - 1))) // 2
-                                dock_y = WINDOW_HEIGHT - DOCK_HEIGHT + 25
-                                
-                                for i, card in enumerate(player_hand):
-                                    card.set_position(dock_start_x + i * (CARD_WIDTH + CARD_SPACING), dock_y)
-                                
-                                print(f"Round {header.round} starting with new cards")
 
                         # Check if turn changed
                         if new_state["current_turn"] != game_state["current_turn"]:
@@ -1808,15 +1770,21 @@ def start_multiplayer_game(network, player_name):
             header.timer.time_left = turn_timer
 
             # Draw all game elements
+            # Draw non-dragged player cards first
             for card in player_hand:
                 if not card.dragging:
                     card.draw(screen)
 
+            # Draw play areas
             player_play_area.draw(screen)
             opponent_play_area.draw(screen)
             go_button.draw(screen)
             header.draw(screen)
             scoreboard.draw(screen)
+
+            # Draw the dragged card last (on top)
+            if dragged_card:
+                dragged_card.draw(screen)
 
             pygame.display.flip()
             clock.tick(60)
